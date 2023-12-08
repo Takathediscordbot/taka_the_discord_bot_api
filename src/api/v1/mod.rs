@@ -1,15 +1,24 @@
 use std::{sync::Arc, time::Duration};
 use headless_chrome::{protocol::cdp::Page::CaptureScreenshotFormatOption, LaunchOptions};
 
-use axum::{Router, response::IntoResponse, routing::get, extract::{State, Path}, Json};
+use axum::{Router, response::IntoResponse, routing::get, extract::{State, Path, Query}, Json};
 use headless_chrome::Browser;
 use moka::future::Cache;
+use serde::Serialize;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tetrio_api::{http::cached_client::CachedClient, models::packet::{Packet, CacheExpiration}};
 
 use crate::Error;
 
 type TetoResponse = Packet<Box<[u8]>>;
+
+#[derive(Serialize)]
+struct TetraData {
+    replay_id: String, 
+    buffer: Box<[u8]>
+}
+
+type TetraResponse = Packet<TetraData>;
 
 #[allow(dead_code)]
 struct ApiV1State {
@@ -77,6 +86,8 @@ pub async fn api_v1() -> Result<Router, Error> {
     Router::new()
         .route("/", get(hello))
         .route("/teto/:user", get(teto))
+        .route("/tetra", get(tetra))
+
         .with_state(state);
 
     Ok(api)
@@ -87,7 +98,80 @@ async fn hello() -> impl IntoResponse {
     "Hello!"
 }
 
-fn take_teto_screenshot(state: &ApiV1State, user: &str) -> Result<Vec<u8>, Error> {
+async fn take_tetra_screenshot(state: &ApiV1State, user: &str, game_num: u32) -> Result<TetraData, Error> {
+    let packet = state.http_client
+        .fetch_tetra_league_recent(&user)
+        .await
+        .map_err(|e| Error(format!("Couldn't fetch tetra league game: {e}")))?;
+
+    let Some(data) = &packet.data else {
+        return Err(Error("User does not have tetra league records".to_string()))
+    };
+
+    let game_num = if game_num <= 0 { 1 } else { game_num };
+
+    let Some(record) = data.records.get((game_num - 1) as usize) else {
+        return Err(Error("Tetra league game not found".to_string()))
+    };
+
+    let (Some(left), Some(_right)) = (record.endcontext.get(0), record.endcontext.get(1))
+    else {
+        return Err(Error("Couldn't parse tetra league data".to_string()));
+    };
+
+    let buffer = {
+
+        log::debug!("made configuration");
+
+        let browser = create_browser(
+            1185,
+            350 + 60 * (left.points.secondary_avg_tracking.len() - 1) as u32)?;
+
+        log::debug!("launched browser");
+        let tab = browser.new_tab().map_err(|e| Error(format!("Couldn't create new tab! {e}")))?;
+        log::debug!("opened tab");
+
+        tab.navigate_to(&format!(
+            "{}/league_replay?user_id={}&replay_id={}",
+            state.html_server_url, user, record.replay_id
+        )).map_err(|e| Error(format!("Couldn't load tetra league replay page! {e}")))?;
+        log::debug!("navigated to tab");
+
+        let _element = tab.wait_for_element("#multilog").map_err(|e| Error(format!("Couldn't find element to screenshot! {e}")))?;
+        log::debug!("waited for element");
+        let buffer =
+            tab.capture_screenshot(CaptureScreenshotFormatOption::Png, None, None, true).map_err(|e| Error(format!("Couldn't take screenshot! {e}")))?;
+        log::debug!("took screenshot");
+
+        tab.close(true).map_err(|e| Error(format!("Couldn't close tab {e}")))?;
+        buffer
+    };
+
+    Ok(TetraData {
+        replay_id: record.replay_id.to_string(),
+        buffer: buffer.into_boxed_slice()
+    })
+}
+
+async fn tetra(State(state): State<Arc<ApiV1State>>,
+ Query(user_id): Query<String>, Query(game_num): Query<u32>) -> impl IntoResponse {
+    match take_tetra_screenshot(&state, &user_id, game_num).await {    
+        Ok(data) => Json(TetraResponse {
+            success: true,
+            data: Some(data),
+            cache: None,
+            error: None
+        }).into_response(),
+        Err(err) => Json(TetraResponse {
+            success: true,
+            data: None,
+            cache: None,
+            error: Some(err.0)
+        }).into_response()
+    }
+}
+
+async fn take_teto_screenshot(state: &ApiV1State, user: &str) -> Result<Vec<u8>, Error> {
     log::debug!("made configuration");
 
     let browser = create_browser(900, 500).map_err(|e| Error(format!("Couldn't create browser ! {e}")))?;
@@ -102,6 +186,10 @@ fn take_teto_screenshot(state: &ApiV1State, user: &str) -> Result<Vec<u8>, Error
         user.to_lowercase()
     )).map_err(|e| Error(format!("Couldn't navigate to url ! {e}")))?;
     log::debug!("navigated to tab");
+
+    tab.wait_until_navigated().map_err(|e| Error(format!("Couldn't wait for tab to finish navigating! {e}")))?;
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let element = tab.wait_for_element(".tetra_modal").map_err(|e| Error(format!("Couldn't find element to screenshot! {e}")))?;
     log::debug!("waited for element");
@@ -144,7 +232,7 @@ async fn teto(State(state): State<Arc<ApiV1State>>, Path(user): Path<String>) ->
 
 
 
-    let buffer = match take_teto_screenshot(&state, &username) {
+    let buffer = match take_teto_screenshot(&state, &username).await {
         Ok(ok) => ok, 
         Err(err) => return Json(TetoResponse { 
             cache: None,

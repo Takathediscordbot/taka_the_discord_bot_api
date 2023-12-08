@@ -1,0 +1,3 @@
+[submodule "taka_the_discord_bot_api"]
+	path = taka_the_discord_bot_api
+	url = https://github.com/Takathediscordbot/taka_the_discord_bot_api
