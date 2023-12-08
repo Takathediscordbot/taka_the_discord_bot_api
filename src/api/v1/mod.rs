@@ -229,6 +229,15 @@ async fn teto(State(state): State<Arc<ApiV1State>>, Path(user): Path<String>) ->
         }).into_response()
     };
 
+    if let None = user.data {
+        return Json(TetoResponse { 
+            cache: None,
+            data: None,
+            error: Some(format!("Couldn't find user!")),
+            success: false
+        }).into_response();
+    }
+
 
 
 
