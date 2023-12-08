@@ -4,7 +4,7 @@ use headless_chrome::{protocol::cdp::Page::CaptureScreenshotFormatOption, Launch
 use axum::{Router, response::IntoResponse, routing::get, extract::{State, Path, Query}, Json};
 use headless_chrome::Browser;
 use moka::future::Cache;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tetrio_api::{http::cached_client::CachedClient, models::packet::{Packet, CacheExpiration}};
 
@@ -16,6 +16,12 @@ type TetoResponse = Packet<Box<[u8]>>;
 struct TetraData {
     replay_id: String, 
     buffer: Box<[u8]>
+}
+
+#[derive(Deserialize)]
+struct TetraQuery {
+    pub user_id: String,
+    pub game_num: u32
 }
 
 type TetraResponse = Packet<TetraData>;
@@ -154,8 +160,8 @@ async fn take_tetra_screenshot(state: &ApiV1State, user: &str, game_num: u32) ->
 }
 
 async fn tetra(State(state): State<Arc<ApiV1State>>,
- Query(user_id): Query<String>, Query(game_num): Query<u32>) -> impl IntoResponse {
-    match take_tetra_screenshot(&state, &user_id, game_num).await {    
+ Query(query): Query<TetraQuery>) -> impl IntoResponse {
+    match take_tetra_screenshot(&state, &query.user_id, query.game_num).await {    
         Ok(data) => Json(TetraResponse {
             success: true,
             data: Some(data),
