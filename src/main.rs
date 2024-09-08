@@ -1,19 +1,13 @@
-use std::fmt::Display;
 mod api;
+use api::Error;
 use axum::{Router, response::IntoResponse};
 use flexi_logger::{TS_DASHES_BLANK_COLONS_DOT_BLANK, DeferredNow, Logger, FileSpec, WriteMode};
 use itertools::Itertools;
 use log::Record;
 use tower_http::cors::CorsLayer;
 
-#[derive(Debug)]
-pub struct Error(String);
 
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+
 
 async fn run_server() -> Result<(), Error> {
     let ip_bind = std::env::var("BIND_URL").unwrap_or("0.0.0.0:8080".to_string());
