@@ -1,5 +1,5 @@
 #![cfg(feature = "database")]
-
+#![allow(unused)]
 // create service to handle user functions
 
 use std::time::SystemTime;

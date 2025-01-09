@@ -1,5 +1,5 @@
 #![cfg(feature = "database")]
-
+#![allow(unused)]
 use std::sync::Arc;
 
 use axum::{

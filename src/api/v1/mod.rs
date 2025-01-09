@@ -6,7 +6,7 @@ pub mod services;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use common::LeagueRecordRequest;
 use controllers::silly_command_controller::get_commands;
-use headless_chrome::{protocol::cdp::{CacheStorage::DataEntry, Page::CaptureScreenshotFormatOption}, LaunchOptions};
+use headless_chrome::{protocol::cdp::Page::CaptureScreenshotFormatOption, LaunchOptions};
 
 use axum::{Router, response::IntoResponse, routing::{get, post}, extract::{State, Path, Query}, Json};
 use headless_chrome::Browser;
@@ -46,7 +46,7 @@ struct TetraQuery {
 
 
 #[derive(Deserialize)]
-struct FullLeaderboardQuery {
+pub struct FullLeaderboardQuery {
     pub country: Option<String>,
 }
 
@@ -338,7 +338,9 @@ pub async fn get_full_leaderboard(state: &ApiV1State<'_>, country: Option<String
         cache: Some(Cache::cached_for(Duration::from_secs(3600)))
     };
 
-    state.http_client.cache_tetrio_api_result_if_not_present::<serde_json::Value>(url, Some(&session_id), serde_json::to_value(&result)?).await?;
+    let json = serde_json::to_string(&result)?;
+
+    state.http_client.cache_tetrio_api_result_if_not_present::<serde_json::Value>(url, Some(&session_id), &json).await?;
 
     Ok(result)
     
@@ -624,7 +626,7 @@ async fn teto(State(state): State<Arc<ApiV1State<'_>>>, Path(user): Path<String>
     
     };
 
-    let Ok(json) = serde_json::to_value(entry) else {
+    let Ok(json) = serde_json::to_string(&entry) else {
         return Json(TetoResponse { 
             cache: None,
             data: None,
@@ -633,7 +635,7 @@ async fn teto(State(state): State<Arc<ApiV1State<'_>>>, Path(user): Path<String>
         }).into_response();
     };
     
-    let Ok(entry) = state.http_client.cache_tetrio_api_result_if_not_present::<serde_json::Value>(url, None, json).await else {
+    let Ok(entry) = state.http_client.cache_tetrio_api_result_if_not_present::<serde_json::Value>(url, None, &json).await else {
         return Json(TetoResponse { 
             cache: None,
             data: None,
